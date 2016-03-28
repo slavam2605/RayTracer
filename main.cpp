@@ -17,27 +17,41 @@ struct color {
 
     color() : r(0), g(0), b(0) { }
 
-    color operator*(const color& o) const {
+    color operator*(const color &o) const {
         return color(r * o.r, g * o.g, b * o.b);
     }
 
-    color& operator+=(const color& o) {
+    color &operator+=(const color &o) {
         r += o.r;
         g += o.g;
         b += o.b;
         return *this;
     }
 
-    color& operator/=(float a) {
+    color &operator/=(float a) {
         r /= a;
         g /= a;
         b /= a;
         return *this;
     }
 
+    color &normalize() {
+        if (r < 0) r = 0.0f;
+        if (r > 1) r = 1.0f;
+        if (g < 0) g = 0.0f;
+        if (g > 1) g = 1.0f;
+        if (b < 0) b = 0.0f;
+        if (b > 1) b = 1.0f;
+        return *this;
+    }
+
 };
 
 const float PI = 3.14159265358979323f;
+
+float sqr(float x) {
+    return x * x;
+}
 
 struct hsv;
 
@@ -220,10 +234,6 @@ struct ray {
 
 const float INF = 1e10;
 
-float sqr(float x) {
-    return x * x;
-}
-
 struct object {
     virtual float intersect(const ray &r) = 0;
 
@@ -232,7 +242,6 @@ struct object {
 
 vec3f view(256 / 2, 256 / 2, -256);
 vector<unique_ptr<object>> scene;
-vector<unique_ptr<object>> light;
 
 vec3f rand_dir() {
     while (true) {
@@ -257,7 +266,8 @@ struct sphere : object {
     color cl;
     bool is_light;
 
-    sphere(const vec3f &c, float R, color cl = color(1, 1, 1), bool is_light = false) : c(c), R(R), cl(cl), is_light(is_light) { }
+    sphere(const vec3f &c, float R, color cl = color(1, 1, 1), bool is_light = false) : c(c), R(R), cl(cl),
+                                                                                        is_light(is_light) { }
 
     sphere(float x, float y, float z, float R, color cl = color(1, 1, 1), bool is_light = false)
             : c(x, y, z), R(R), cl(cl), is_light(is_light) { }
@@ -268,7 +278,8 @@ struct sphere : object {
         vec3f dr = c - r.r0;
         float D = sqr(r.s * dr) + sqr(R) - dr * dr;
         if (D < 0) return 2 * INF;
-        return r.s * dr - sqrt(D);
+        float result = r.s * dr - sqrt(D);
+        if (result < 0) return 2 * INF; else return result;
     }
 
     color get_color(const ray &r, const vec3f &p, int depth) {
@@ -293,7 +304,7 @@ color get_color(float x, float y) {
     vec3f s = vec3f(x, y, 0) - view;
     s /= sqrt(s * s);
     ray r(view, s);
-    return get_color(r, 1);
+    return get_color(r, 1).normalize();
 }
 
 color get_color(const ray &r, int depth) {
@@ -310,34 +321,38 @@ color get_color(const ray &r, int depth) {
     return scene[min_id]->get_color(r, r.s * min_dist + r.r0, depth);
 }
 
-
 color mix2(color c1, color c2) {
     return hsv2rgb(rgb2hsv(c1).mix(rgb2hsv(c2)));
 }
 
 color get_pixel(int x, int y) {
-    return mix2(
-            mix2(get_color(x - 0.25f, y - 0.25f),
-                 get_color(x - 0.25f, y + 0.25f)),
-            mix2(get_color(x + 0.25f, y - 0.25f),
-                 get_color(x + 0.25f, y + 0.25f)));
+    return get_color(x, y);
+//    return mix2(
+//            mix2(get_color(x - 0.25f, y - 0.25f),
+//                 get_color(x - 0.25f, y + 0.25f)),
+//            mix2(get_color(x + 0.25f, y - 0.25f),
+//                 get_color(x + 0.25f, y + 0.25f)));
 }
 
 int main() {
-    int w = 256;
-    int h = 256;
+    int w = 512;
+    int h = 512;
 
 //    scene.push_back(unique_ptr<sphere>(new sphere(w / 2 - w / 4, h / 2, w / 2, w / 2, color(1, 0, 0))));
 //    scene.push_back(unique_ptr<sphere>(new sphere(w / 2 + w / 6, h / 2, w / 2, w / 2, color(0, 1, 0))));
-//    light.push_back(unique_ptr<sphere>(new sphere(w, -h, w / 2, w / 3, color(10, 10, 10))));
+//    scene.push_back(unique_ptr<sphere>(new sphere(w, 0, 0, w / 4, color(10, 10, 10), true)));
 
-    scene.push_back(unique_ptr<sphere>(new sphere(w / 2, h / 2, w / 2, w / 2, color(1, 0, 0))));
-    scene.push_back(unique_ptr<sphere>(new sphere(w, 0, w, w / 3, color(10, 10, 10), true)));
+    scene.push_back(unique_ptr<sphere>(new sphere(0, h, w / 2, w / 2, color(1, 0, 0))));
+    scene.push_back(unique_ptr<sphere>(new sphere(w / 2 + w / 4 - w / 6, h / 4 + h / 6, w / 2, w / 6, color(0, 1, 0))));
+    scene.push_back(unique_ptr<sphere>(new sphere(w, 0, w / 2, w / 4, color(20, 20, 20), true)));
 
-    view = vec3f(w / 2, h / 2, -w / 2);
+//    scene.push_back(unique_ptr<sphere>(new sphere(w / 2, h / 2, w / 2, w / 2, color(1, 0, 0))));
+//    scene.push_back(unique_ptr<sphere>(new sphere(w, 0, 0, w / 4, color(10, 10, 10), true)));
+
+    view = vec3f(w / 2, h / 2, -w);
     int time = clock();
-//    string path = "E:\\C++ Projects\\RayTracer\\";
-    string path = "C:\\Users\\slava\\ClionProjects\\RayTracer\\";
+    string path = "E:\\C++ Projects\\RayTracer\\";
+//    string path = "C:\\Users\\slava\\ClionProjects\\RayTracer\\";
     ofstream fout(path + "out.ppm", ios::out | ios::binary);
     fout << "P6 " << w << " " << h << " 255 ";
     color pixel;
@@ -354,15 +369,6 @@ int main() {
 }
 
 ofstream &print(ofstream &fout, const color &pixel) {
-    unsigned char r;
-    unsigned char g;
-    unsigned char b;
-    if (pixel.r < 0) r = 0; else if (pixel.r > 1) r = 255; else
-        r = (unsigned char) (pixel.r * 255);
-    if (pixel.g < 0) g = 0; else if (pixel.g > 1) g = 255; else
-        g = (unsigned char) (pixel.g * 255);
-    if (pixel.b < 0) b = 0; else if (pixel.b > 1) b = 255; else
-        b = (unsigned char) (pixel.b * 255);
-    fout << r << g << b;
+    fout << (unsigned char) (pixel.r * 255) << (unsigned char) (pixel.g * 255) << (unsigned char) (pixel.b * 255);
     return fout;
 }
