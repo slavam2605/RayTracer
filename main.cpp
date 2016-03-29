@@ -17,25 +17,25 @@ struct color {
 
     color() : r(0), g(0), b(0) { }
 
-    color operator*(const color &o) const {
+    color operator*(const color& o) const {
         return color(r * o.r, g * o.g, b * o.b);
     }
 
-    color &operator+=(const color &o) {
+    color& operator+=(const color& o) {
         r += o.r;
         g += o.g;
         b += o.b;
         return *this;
     }
 
-    color &operator/=(float a) {
+    color& operator/=(float a) {
         r /= a;
         g /= a;
         b /= a;
         return *this;
     }
 
-    color &normalize() {
+    color& normalize() {
         if (r < 0) r = 0.0f;
         if (r > 1) r = 1.0f;
         if (g < 0) g = 0.0f;
@@ -55,9 +55,9 @@ float sqr(float x) {
 
 struct hsv;
 
-inline hsv hsv2hsl(const hsv &cl);
+inline hsv hsv2hsl(const hsv& cl);
 
-inline hsv hsl2hsv(const hsv &cl);
+inline hsv hsl2hsv(const hsv& cl);
 
 struct hsv {
     float h;
@@ -70,7 +70,7 @@ struct hsv {
 
     hsv() { }
 
-    hsv mix(const hsv &o) {
+    hsv mix(const hsv& o) {
         hsv hsl1 = hsv2hsl(*this);
         hsv hsl2 = hsv2hsl(o);
         float x1 = hsl1.s * cos(PI * hsl1.h / 180);
@@ -86,7 +86,7 @@ struct hsv {
     }
 };
 
-inline hsv hsv2hsl(const hsv &cl) {
+inline hsv hsv2hsl(const hsv& cl) {
     float hue2 = (2 - cl.s) * cl.v;
     return hsv(
             cl.h,
@@ -95,7 +95,7 @@ inline hsv hsv2hsl(const hsv &cl) {
     );
 }
 
-inline hsv hsl2hsv(const hsv &cl) {
+inline hsv hsl2hsv(const hsv& cl) {
     float sat = cl.s * (cl.v < 0.5 ? cl.v : 1 - cl.v);
     return hsv(
             cl.h,
@@ -184,15 +184,15 @@ struct vec3f {
 
     vec3f() : x(0), y(0), z(0) { }
 
-    vec3f operator+(const vec3f &b) const {
+    vec3f operator+(const vec3f& b) const {
         return vec3f(this->x + b.x, this->y + b.y, this->z + b.z);
     }
 
-    vec3f operator-(const vec3f &b) const {
+    vec3f operator-(const vec3f& b) const {
         return vec3f(this->x - b.x, this->y - b.y, this->z - b.z);
     }
 
-    float operator*(const vec3f &b) const {
+    float operator*(const vec3f& b) const {
         return this->x * b.x + this->y * b.y + this->z * b.z;
     }
 
@@ -204,14 +204,14 @@ struct vec3f {
         return vec3f(this->x / a, this->y / a, this->z / a);
     }
 
-    vec3f &operator/=(float a) {
+    vec3f& operator/=(float a) {
         this->x /= a;
         this->y /= a;
         this->z /= a;
         return *this;
     }
 
-    vec3f &operator*=(float a) {
+    vec3f& operator*=(float a) {
         this->x *= a;
         this->y *= a;
         this->z *= a;
@@ -224,7 +224,7 @@ struct ray {
     vec3f r0;
     vec3f s;
 
-    ray(const vec3f &r0, const vec3f &s) : r0(r0), s(s) { }
+    ray(const vec3f& r0, const vec3f& s) : r0(r0), s(s) { }
 
     ray(float x0, float y0, float z0, float sx, float sy, float sz)
             : r0(x0, y0, z0), s(sx, sy, sz) { }
@@ -235,9 +235,9 @@ struct ray {
 const float INF = 1e10;
 
 struct object {
-    virtual float intersect(const ray &r) = 0;
+    virtual float intersect(const ray& r) = 0;
 
-    virtual color get_color(const ray &r, const vec3f &p, int depth) = 0;
+    virtual color get_color(const ray& r, const vec3f& p, int depth) = 0;
 };
 
 vec3f view(256 / 2, 256 / 2, -256);
@@ -258,36 +258,44 @@ vec3f rand_dir() {
 
 const int DEPTH_LIMIT = 1;
 
-color get_color(const ray &r, int depth);
+color get_color(const ray& r, int depth);
+
+const int NN = 500;
 
 struct sphere : object {
     vec3f c;
     float R;
     color cl;
     bool is_light;
+    bool is_mirror;
 
-    sphere(const vec3f &c, float R, color cl = color(1, 1, 1), bool is_light = false) : c(c), R(R), cl(cl),
-                                                                                        is_light(is_light) { }
+    sphere(const vec3f& c, float R, color cl = color(1, 1, 1), bool is_light = false, bool is_mirror = false)
+            : c(c), R(R), cl(cl), is_light(is_light), is_mirror(is_mirror) { }
 
-    sphere(float x, float y, float z, float R, color cl = color(1, 1, 1), bool is_light = false)
-            : c(x, y, z), R(R), cl(cl), is_light(is_light) { }
+    sphere(float x, float y, float z, float R, color cl = color(1, 1, 1), bool is_light = false, bool is_mirror = false)
+            : c(x, y, z), R(R), cl(cl), is_light(is_light), is_mirror(is_mirror) { }
 
     sphere() { }
 
-    float intersect(const ray &r) {
+    float intersect(const ray& r) {
         vec3f dr = c - r.r0;
         float D = sqr(r.s * dr) + sqr(R) - dr * dr;
-        if (D < 0) return 2 * INF;
+        if (D < 1e-5) return 2 * INF;
         float result = r.s * dr - sqrt(D);
         if (result < 0) return 2 * INF; else return result;
     }
 
-    color get_color(const ray &r, const vec3f &p, int depth) {
+    color get_color(const ray& r, const vec3f& p, int depth) {
         if (is_light) return cl;
         if (depth > DEPTH_LIMIT) return color(0, 0, 0);
+        if (is_mirror) {
+            vec3f norm = (p - c) / R;
+            vec3f s = r.s - norm * 2 * (r.s * norm);
+            return ::get_color(ray(p, s), depth);
+        }
         color light_c;
         vec3f norm = (p - c) / R;
-        int n = 1000;
+        int n = NN;
         for (int i = 0; i < n; i++) {
             vec3f dir = rand_dir();
             if (dir * norm < 0) dir *= -1;
@@ -298,7 +306,43 @@ struct sphere : object {
     }
 };
 
-ofstream &print(ofstream &fout, const color &pixel);
+struct plane : object {
+    vec3f norm;
+    float D;
+    color cl;
+    bool is_mirror;
+
+    plane(const vec3f& norm, float D, const color& cl = color(1, 1, 1), bool is_mirror = false)
+            : norm(norm), D(D), cl(cl), is_mirror(is_mirror) { }
+
+    plane(const vec3f& norm, const vec3f& p, const color& cl = color(1, 1, 1), bool is_mirror = false)
+            : norm(norm), D(norm * (-1) * p), cl(cl), is_mirror(is_mirror) { }
+
+    float intersect(const ray& r) {
+        float result = -(D + r.r0 * norm) / (r.s * norm);
+        if (result < 1e-5) return 2 * INF;
+        return result;
+    }
+
+    color get_color(const ray& r, const vec3f& p, int depth) {
+        if (depth > DEPTH_LIMIT) return color(0, 0, 0);
+        if (is_mirror) {
+            vec3f s = r.s - norm * 2 * (r.s * norm);
+            return ::get_color(ray(p, s), depth);
+        }
+        color light_c;
+        int n = NN;
+        for (int i = 0; i < n; i++) {
+            vec3f dir = rand_dir();
+            if (dir * norm < 0) dir *= -1;
+            light_c += ::get_color(ray(p, dir), depth + 1);
+        }
+        light_c /= n;
+        return cl * light_c;
+    }
+};
+
+ofstream& print(ofstream& fout, const color& pixel);
 
 color get_color(float x, float y) {
     vec3f s = vec3f(x, y, 0) - view;
@@ -307,7 +351,7 @@ color get_color(float x, float y) {
     return get_color(r, 1).normalize();
 }
 
-color get_color(const ray &r, int depth) {
+color get_color(const ray& r, int depth) {
     int min_id = 0;
     float min_dist = scene[0]->intersect(r);
     for (int i = 1; i < scene.size(); i++) {
@@ -325,7 +369,7 @@ color mix2(color c1, color c2) {
     return hsv2rgb(rgb2hsv(c1).mix(rgb2hsv(c2)));
 }
 
-color get_pixel(int x, int y) {
+inline color get_pixel(int x, int y) {
     return get_color(x, y);
 //    return mix2(
 //            mix2(get_color(x - 0.25f, y - 0.25f),
@@ -335,40 +379,58 @@ color get_pixel(int x, int y) {
 }
 
 int main() {
-    int w = 512;
-    int h = 512;
+    int w = 256;
+    int h = 256;
 
 //    scene.push_back(unique_ptr<sphere>(new sphere(w / 2 - w / 4, h / 2, w / 2, w / 2, color(1, 0, 0))));
 //    scene.push_back(unique_ptr<sphere>(new sphere(w / 2 + w / 6, h / 2, w / 2, w / 2, color(0, 1, 0))));
 //    scene.push_back(unique_ptr<sphere>(new sphere(w, 0, 0, w / 4, color(10, 10, 10), true)));
 
-    scene.push_back(unique_ptr<sphere>(new sphere(0, h, w / 2, w / 2, color(1, 0, 0))));
+    int MARGIN = 4 * w / 3;
+
+    scene.push_back(unique_ptr<sphere>(new sphere(0, 2 * h / 3, w / 2, w / 3, color(1, 0, 0), false, true)));
     scene.push_back(unique_ptr<sphere>(new sphere(w / 2 + w / 4 - w / 6, h / 4 + h / 6, w / 2, w / 6, color(0, 1, 0))));
-    scene.push_back(unique_ptr<sphere>(new sphere(w, 0, w / 2, w / 4, color(20, 20, 20), true)));
+    scene.push_back(unique_ptr<sphere>(new sphere(0, 0, w, w / 5, color(20, 20, 20), true)));
+    scene.push_back(unique_ptr<sphere>(new sphere(w, 0, w, w / 5, color(20, 20, 20), true)));
+    scene.push_back(unique_ptr<sphere>(new sphere(0, 0, 0, w / 5, color(20, 20, 20), true)));
+    scene.push_back(unique_ptr<sphere>(new sphere(w, 0, 0, w / 5, color(20, 20, 20), true)));
+    scene.push_back(unique_ptr<plane>(new plane(vec3f(-1, 0, 0), vec3f(w + MARGIN, 0, 0), color(1, 1, 0))));
+    scene.push_back(unique_ptr<plane>(new plane(vec3f(1, 0, 0), vec3f(0 - MARGIN, 0, 0), color(1, 1, 0))));
+    scene.push_back(unique_ptr<plane>(new plane(vec3f(0, -1, 0), vec3f(0, h + MARGIN, 0), color(1, 0, 1))));
+    scene.push_back(unique_ptr<plane>(new plane(vec3f(0, 1, 0), vec3f(0, 0 - MARGIN, 0), color(1, 0, 1))));
+    scene.push_back(unique_ptr<plane>(new plane(vec3f(0, 0, -1), vec3f(0, 0, w + MARGIN), color(0, 1, 1))));
+    scene.push_back(unique_ptr<plane>(new plane(vec3f(0, 0, 1), vec3f(0, 0, 0 - MARGIN), color(0, 1, 1))));
 
 //    scene.push_back(unique_ptr<sphere>(new sphere(w / 2, h / 2, w / 2, w / 2, color(1, 0, 0))));
 //    scene.push_back(unique_ptr<sphere>(new sphere(w, 0, 0, w / 4, color(10, 10, 10), true)));
 
-    view = vec3f(w / 2, h / 2, -w);
+    view = vec3f(w / 2, h / 2, -w / 2);
     int time = clock();
-    string path = "E:\\C++ Projects\\RayTracer\\";
-//    string path = "C:\\Users\\slava\\ClionProjects\\RayTracer\\";
+//    string path = "E:\\C++ Projects\\RayTracer\\";
+    string path = "C:\\Users\\slava\\ClionProjects\\RayTracer\\RayTracer\\";
     ofstream fout(path + "out.ppm", ios::out | ios::binary);
     fout << "P6 " << w << " " << h << " 255 ";
     color pixel;
-    for (int j = 0; j < w; j++) {
-        for (int i = 0; i < h; i++) {
+    unsigned char cl[w * h * 3];
+    int pointer = 0;
+    int last_flushed = 0;
+    for (int j = 0; j < h; j++) {
+        for (int i = 0; i < w; i++) {
             pixel = get_pixel(i, j);
-            print(fout, pixel);
+            cl[pointer++] = pixel.r * 255;
+            cl[pointer++] = pixel.g * 255;
+            cl[pointer++] = pixel.b * 255;
+        }
+        if (100 * j / h > last_flushed) {
+            cout << "[" << 100 * j / h << "%]";
+            last_flushed = 100 * j / h;
+            float progress = (float) j / h;
+            cout << ", estimated time: "  << float(clock() - time) / CLOCKS_PER_SEC / progress * (1 - progress) << " seconds" << endl;
         }
     }
+    fout.write((char*) cl, w * h * 3);
     fout.close();
     cout << float(clock() - time) / CLOCKS_PER_SEC << " seconds" << endl;
     system(("convert \"" + path + "out.ppm\" \"" + path + "out.png\"").c_str());
     return 0;
-}
-
-ofstream &print(ofstream &fout, const color &pixel) {
-    fout << (unsigned char) (pixel.r * 255) << (unsigned char) (pixel.g * 255) << (unsigned char) (pixel.b * 255);
-    return fout;
 }
