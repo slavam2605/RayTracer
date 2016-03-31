@@ -22,6 +22,10 @@ struct color {
         return color(r * o.r, g * o.g, b * o.b);
     }
 
+    color operator*(float a) const {
+        return color(r * a, g * a, b * a);
+    }
+
     color operator/(float a) const {
         return color(r / a, g / a, b / a);
     }
@@ -233,7 +237,7 @@ struct ray {
     vec3f r0;
     vec3f s;
 
-    ray(const vec3f& r0, const vec3f& s) : r0(r0), s(s) { }
+    ray(const vec3f& r0, const vec3f& s) : r0(r0), s(s / sqrtf(s.x * s.x + s.y * s.y + s.z * s.z)) { }
 
     ray(float x0, float y0, float z0, float sx, float sy, float sz)
             : r0(x0, y0, z0), s(sx, sy, sz) { }
@@ -265,12 +269,12 @@ vec3f rand_dir() {
     }
 }
 
-const int DEPTH_LIMIT = 100;
+const int DEPTH_LIMIT = 10;
 const int BUNCH_LIMIT = 1;
 
 color get_color(const ray& r, float cn, int bunch_depth, int depth);
 
-const int NN = 8000;
+const int NN = 1000;
 
 struct sphere : object {
     vec3f c;
@@ -279,16 +283,17 @@ struct sphere : object {
     bool is_light;
     bool is_mirror;
     bool is_transparent;
+    bool is_glossy;
     float on;
 
     sphere(const vec3f& c, float R, color cl = color(1, 1, 1), bool is_light = false, bool is_mirror = false,
-           bool is_transparent = false, float on = 1)
-            : c(c), R(R), cl(cl), is_light(is_light), is_mirror(is_mirror), is_transparent(is_transparent), on(on) { }
+           bool is_transparent = false, float on = 1, bool is_glossy = false)
+            : c(c), R(R), cl(cl), is_light(is_light), is_mirror(is_mirror), is_transparent(is_transparent), on(on), is_glossy(is_glossy) { }
 
     sphere(float x, float y, float z, float R, color cl = color(1, 1, 1), bool is_light = false, bool is_mirror = false,
-           bool is_transparent = false, float on = 1)
+           bool is_transparent = false, float on = 1, bool is_glossy = false)
             : c(x, y, z), R(R), cl(cl), is_light(is_light), is_mirror(is_mirror), is_transparent(is_transparent),
-              on(on) { }
+              on(on), is_glossy(is_glossy) { }
 
     sphere() { }
 
@@ -313,19 +318,50 @@ struct sphere : object {
             return ::get_color(ray(p + norm, s), cn, bunch_depth, depth + 1);
         }
         vec3f norm = (p - c) / R;
+        float fg = acosf(norm.z);
+        float ps = atan2(norm.y, norm.x);
+        norm.x += cos(10 * fg) * sin(10 * ps) / 3;
+        norm.y += sin(10 * fg) * sin(10 * ps) / 3;
+        norm.z += cos(10 * ps) / 3;
         if (is_transparent) {
             if (r.s * norm > 0) norm *= -1;
             vec3f s = r.s * cn;
             float n2 = r.s * norm < 0 ? on : 1;
             float D = (n2 * n2 - cn * cn) / (s * norm) / (s * norm) + 1;
-            if (D < 1e-5) {
-                vec3f ss = r.s - norm * 2 * (r.s * norm);
-                return ::get_color(ray(p + norm, ss), cn, bunch_depth, depth + 1);
-            }
+            vec3f ss = r.s - norm * 2 * (r.s * norm);
+//            cout << ss.x * ss.x + ss.y * ss.y + ss.z * ss.z << endl;
+            color c_refl = ::get_color(ray(p + norm, ss), cn, bunch_depth, depth + 1);
+            if (D < 1e-5) return c_refl;
             vec3f ns = (s + norm * (s * norm) * (sqrtf(D) - 1)) / n2;
-            return ::get_color(ray(p - norm, ns), n2, bunch_depth, depth + 1);
+            //cout << ns.x * ns.x + ns.y * ns.y + ns.z * ns.z << endl;
+            color c_refr = ::get_color(ray(p - norm, ns), n2, bunch_depth, depth + 1);
+            float cosa = -(r.s * norm);
+            float sina = sqrtf(fabs(1 - cosa * cosa));
+            float sinb = cn / n2 * sina;
+            float cosb = sqrtf(fabs(1 - sinb * sinb));
+            float R = sqr((sina * cosb - cosa * sinb) / (sina * cosb + cosa * sinb));
+            return c_refl * R + c_refr * (1 - R);
         }
         if (bunch_depth > BUNCH_LIMIT) return color(0, 0, 0);
+        if (is_glossy) {
+            vec3f ss = r.s - norm * 2 * (r.s * norm);
+            color c_refl = ::get_color(ray(p + norm, ss), cn, bunch_depth, depth + 1);
+            color light_c;
+            int n = NN;
+            for (int i = 0; i < n; i++) {
+                vec3f dir = rand_dir();
+                if (dir * norm < 0) dir *= -1;
+                light_c += ::get_color(ray(p + norm, dir), cn, bunch_depth + 1, depth + 1);
+            }
+            light_c /= n;
+            color c_difr = cl * light_c;
+            float cosa = -(r.s * norm);
+            float sina = sqrtf(fabs(1 - cosa * cosa));
+            float sinb = cn / on * sina;
+            float cosb = sqrtf(fabs(1 - sinb * sinb));
+            float R = sqr((sina * cosb - cosa * sinb) / (sina * cosb + cosa * sinb));
+            return c_refl * R + c_difr * (1 - R);
+        }
         color light_c;
         int n = NN;
         for (int i = 0; i < n; i++) {
@@ -379,14 +415,23 @@ struct plane : object {
     }
 };
 
-ofstream& print(ofstream& fout, const color& pixel);
+const int w = 512;
+const int h = 512;
 
 color get_color(float x, float y) {
-    vec3f s = vec3f(x, y, 0) - view;
-    s /= sqrt(s * s);
-    ray r(view, s);
-//    ray r(vec3f(x, y, 0), vec3f(0, 0, 1));
-    return get_color(r, 1, 1, 1).normalize();
+    int N = 0;
+    float range = 1;
+    color cl;
+    for (int i = -N; i <= N; i++) {
+        for (int j = -N; j <= N; j++) {
+            vec3f vv = view + vec3f(i * range / (N ? N : 1), j * range / (N ? N : 1), 0);
+            vec3f s = vec3f(2 * x - w / 2, 2 * y - h / 2, 256) - vv;
+            s /= sqrt(s * s);
+            ray r(vv, s);
+            cl += get_color(r, 1, 1, 1).normalize();
+        }
+    }
+    return cl / (2 * N + 1) / (2 * N + 1);
 }
 
 color get_color(const ray& r, float cn, int bunch_depth, int depth) {
@@ -410,16 +455,13 @@ color mix2(color c1, color c2) {
 }
 
 inline color get_pixel(int x, int y) {
-//    return get_color(x, y);
-    return mix2(
-            mix2(get_color(x - 0.25f, y - 0.25f),
-                 get_color(x - 0.25f, y + 0.25f)),
-            mix2(get_color(x + 0.25f, y - 0.25f),
-                 get_color(x + 0.25f, y + 0.25f)));
+    return get_color(x, y);
+//    return mix2(
+//            mix2(get_color(x - 0.25f, y - 0.25f),
+//                 get_color(x - 0.25f, y + 0.25f)),
+//            mix2(get_color(x + 0.25f, y - 0.25f),
+//                 get_color(x + 0.25f, y + 0.25f)));
 }
-
-const int w = 512;
-const int h = 512;
 
 unsigned char cl[w * h * 3];
 
@@ -442,6 +484,8 @@ void perform(int k, int n) {
 }
 
 int main() {
+//    SetPriorityClass(GetCurrentProcess(), IDLE_PRIORITY_CLASS);
+
     int MARGIN = 4 * w / 3;
 
     float f = 1;
@@ -456,9 +500,12 @@ int main() {
 
     scene.push_back(unique_ptr<sphere>(new sphere(w / 2, w / 4, w / 2, w / 5, color(30, 30, 30), true)));          // 1
 
-    scene.push_back(unique_ptr<sphere>(new sphere(w / 2, 3 * h / 4, w / 2, w / 4, color(1, 1, 1), false, true, true, 1.1f)));          // 0
+    scene.push_back(unique_ptr<sphere>(new sphere(w / 2, 3 * h / 4, w / 2, w / 4, color(1, 0, 0))));          // 0
 
-    scene.push_back(unique_ptr<sphere>(new sphere(w / 4, 4 * h / 5, w, w / 5, color(0, 1, 0))));
+//    scene.push_back(unique_ptr<sphere>(new sphere(w / 2, 3 * h / 4, w / 2, w / 4, color(1, 0, 0), false, false, false, 1.1f, true)));          // 0
+
+//    scene.push_back(unique_ptr<sphere>(new sphere(w / 4, 4 * h / 5, w, w / 5, color(0, 1, 0))));
+//    scene.push_back(unique_ptr<sphere>(new sphere((256 + 170) / 512.0f * w, 4 * h / 5, 100.0f / 512 * w, w / 5, color(0, 0, 1), false, false, false, 1.15f, true)));
     //scene.push_back(unique_ptr<sphere>(new sphere(3 * w / 2, h / 2, w / 2, w / 2, color(0, 0, 1))));
 
 //    scene.push_back(unique_ptr<plane>(new plane(vec3f(-1, 0, 0), vec3f(w + MARGIN, 0, 0), color(1, 1, 0))));                            // 6
@@ -476,25 +523,24 @@ int main() {
 //    return 0;
 
     int start_time = time(0);
-//    string path = "E:\\C++ Projects\\RayTracer\\";
-    string path = "C:\\Users\\slava\\ClionProjects\\RayTracer\\RayTracer\\";
+    string path = "E:\\C++ Projects\\RayTracer\\";
+//    string path = "C:\\Users\\slava\\ClionProjects\\RayTracer\\RayTracer\\";
 
-//    thread t1(perform, 0, 8), t2(perform, 1, 8), t3(perform, 2, 8), t4(perform, 3, 8),
-//            t5(perform, 4, 8), t6(perform, 5, 8), t7(perform, 6, 8), t8(perform, 7, 8);
-//    t1.join();
-//    t2.join();
-//    t3.join();
-//    t4.join();
-//    t5.join();
-//    t6.join();
-//    t7.join();
-//    t8.join();
-//    thread t1(perform, 0, 4), t2(perform, 1, 4), t3(perform, 2, 4), t4(perform, 3, 4);
-    thread t1(perform, 0, 4), t2(perform, 1, 4), t3(perform, 2, 4), t4(perform, 3, 4);
+    thread t1(perform, 0, 8), t2(perform, 1, 8), t3(perform, 2, 8), t4(perform, 3, 8),
+            t5(perform, 4, 8), t6(perform, 5, 8), t7(perform, 6, 8), t8(perform, 7, 8);
     t1.join();
     t2.join();
     t3.join();
     t4.join();
+    t5.join();
+    t6.join();
+    t7.join();
+    t8.join();
+//    thread t1(perform, 0, 4), t2(perform, 1, 4), t3(perform, 2, 4), t4(perform, 3, 4);
+//    t1.join();
+//    t2.join();
+//    t3.join();
+//    t4.join();
 //    perform(0, 1);
 
     ofstream fout(path + "out.ppm", ios::out | ios::binary);
