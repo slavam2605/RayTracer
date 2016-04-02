@@ -6,6 +6,7 @@
 #include <ctime>
 #include <memory>
 #include <thread>
+#include <iomanip>
 
 using namespace std;
 
@@ -306,46 +307,52 @@ struct sphere : object {
             result = r.s * dr + sqrt(D);
             if (result < 0) return 2 * INF; else return result;
         } else return result;
-//        if (result < 0) return /*r.s * dr + sqrt(D)*/2 * INF; else return result;
     }
 
     color get_color(const ray& r, const vec3f& p, float cn, int bunch_depth, int depth) {
         if (depth > DEPTH_LIMIT) return color(0, 0, 0);
         if (is_light) return cl;
+        vec3f norm = (p - c) / R;
         if (is_mirror) {
-            vec3f norm = (p - c) / R;
             vec3f s = r.s - norm * 2 * (r.s * norm);
             return ::get_color(ray(p + norm, s), cn, bunch_depth, depth + 1);
         }
-        vec3f norm = (p - c) / R;
-        float fg = acosf(norm.z);
-        float ps = atan2(norm.y, norm.x);
-        norm.x += cos(10 * fg) * sin(10 * ps) / 3;
-        norm.y += sin(10 * fg) * sin(10 * ps) / 3;
-        norm.z += cos(10 * ps) / 3;
         if (is_transparent) {
             if (r.s * norm > 0) norm *= -1;
             vec3f s = r.s * cn;
             float n2 = r.s * norm < 0 ? on : 1;
             float D = (n2 * n2 - cn * cn) / (s * norm) / (s * norm) + 1;
             vec3f ss = r.s - norm * 2 * (r.s * norm);
-//            cout << ss.x * ss.x + ss.y * ss.y + ss.z * ss.z << endl;
-            color c_refl = ::get_color(ray(p + norm, ss), cn, bunch_depth, depth + 1);
-            if (D < 1e-5) return c_refl;
-            vec3f ns = (s + norm * (s * norm) * (sqrtf(D) - 1)) / n2;
-            //cout << ns.x * ns.x + ns.y * ns.y + ns.z * ns.z << endl;
-            color c_refr = ::get_color(ray(p - norm, ns), n2, bunch_depth, depth + 1);
+
             float cosa = -(r.s * norm);
             float sina = sqrtf(fabs(1 - cosa * cosa));
             float sinb = cn / n2 * sina;
             float cosb = sqrtf(fabs(1 - sinb * sinb));
             float R = sqr((sina * cosb - cosa * sinb) / (sina * cosb + cosa * sinb));
+
+            color c_refl;
+            if (D < 1e-5 || fabs(R) > 1e-3) {
+                c_refl = ::get_color(ray(p + norm, ss), cn, bunch_depth, depth + 1);
+            }
+            if (D < 1e-5) return c_refl;
+            vec3f ns = s + norm * (s * norm) * (sqrtf(D) - 1);
+
+            color c_refr = ::get_color(ray(p - norm, ns), n2, bunch_depth, depth + 1);
             return c_refl * R + c_refr * (1 - R);
         }
         if (bunch_depth > BUNCH_LIMIT) return color(0, 0, 0);
         if (is_glossy) {
+            float cosa = -(r.s * norm);
+            float sina = sqrtf(fabs(1 - cosa * cosa));
+            float sinb = cn / on * sina;
+            float cosb = sqrtf(fabs(1 - sinb * sinb));
+            float R = sqr((sina * cosb - cosa * sinb) / (sina * cosb + cosa * sinb));
+
             vec3f ss = r.s - norm * 2 * (r.s * norm);
-            color c_refl = ::get_color(ray(p + norm, ss), cn, bunch_depth, depth + 1);
+            color c_refl;
+            if (R > 1e-3) {
+                c_refl = ::get_color(ray(p + norm, ss), cn, bunch_depth, depth + 1);
+            }
             color light_c;
             int n = NN;
             for (int i = 0; i < n; i++) {
@@ -355,11 +362,6 @@ struct sphere : object {
             }
             light_c /= n;
             color c_difr = cl * light_c;
-            float cosa = -(r.s * norm);
-            float sina = sqrtf(fabs(1 - cosa * cosa));
-            float sinb = cn / on * sina;
-            float cosb = sqrtf(fabs(1 - sinb * sinb));
-            float R = sqr((sina * cosb - cosa * sinb) / (sina * cosb + cosa * sinb));
             return c_refl * R + c_difr * (1 - R);
         }
         color light_c;
@@ -404,8 +406,7 @@ struct plane : object {
         for (int i = 0; i < n; i++) {
             vec3f dir = rand_dir();
             if (dir * norm < 0) dir *= -1;
-            //cout << "kek :: " << dir.x << ", " << dir.y << ", " << dir.z << endl;
-            light_c += ::get_color(ray(p + norm /* TODO */, dir), cn, bunch_depth + 1, depth + 1);
+            light_c += ::get_color(ray(p + norm, dir), cn, bunch_depth + 1, depth + 1);
         }
         light_c /= n;
         if (norm.y != 0) if (((int) floor(p.x / 100) + (int) floor(p.z / 100)) & 1)
@@ -420,7 +421,7 @@ const int h = 512;
 
 color get_color(float x, float y) {
     int N = 0;
-    float range = 1;
+    float range = 2.5f;
     color cl;
     for (int i = -N; i <= N; i++) {
         for (int j = -N; j <= N; j++) {
@@ -465,6 +466,18 @@ inline color get_pixel(int x, int y) {
 
 unsigned char cl[w * h * 3];
 
+int progress[8];
+
+void print(int n) {
+    for (int i = 0; i < n; i++) {
+        if (progress[i] < 0)
+            cout << "      ";
+        else
+            cout << " [" << (progress[i] < 10 ? "0" : "") << progress[i] << "%]";
+    }
+    cout << endl;
+}
+
 void perform(int k, int n) {
     color pixel;
     int offset;
@@ -478,9 +491,12 @@ void perform(int k, int n) {
             cl[offset + 1] = pixel.g * 255;
             cl[offset + 2] = pixel.b * 255;
         }
-        if (i % 10 == 0)
-            cout << "thread" << k << ": [" << 100 * (i + 1 - start) / (end - start) << "%]" << endl;
+        if (i % 10 == 0) {
+            progress[k] = 100 * (i + 1 - start) / (end - start);
+            print(n);
+        }
     }
+    progress[k] = -1;
 }
 
 int main() {
@@ -498,9 +514,15 @@ int main() {
 //    scene.push_back(unique_ptr<sphere>(new sphere(0 - f * MARGIN, -f * MARGIN, 0 - f * MARGIN, w / 5, color(30, 30, 30), true)));       // 4
 //    scene.push_back(unique_ptr<sphere>(new sphere(w + f * MARGIN, -f * MARGIN, 0 - f * MARGIN, w / 5, color(30, 30, 30), true)));       // 5
 
-    scene.push_back(unique_ptr<sphere>(new sphere(w / 2, w / 4, w / 2, w / 5, color(30, 30, 30), true)));          // 1
+    scene.push_back(unique_ptr<sphere>(new sphere(w / 2, -h, w / 2, w / 5, color(100, 100, 100), true)));          // 1
 
-    scene.push_back(unique_ptr<sphere>(new sphere(w / 2, 3 * h / 4, w / 2, w / 4, color(1, 0, 0))));          // 0
+    scene.push_back(unique_ptr<sphere>(new sphere(w / 2, 3 * h / 4, w / 2, w / 4, color(1, 0, 0), false, false, false, 1.2f, true)));          // 0
+    scene.push_back(unique_ptr<sphere>(new sphere(w, 3 * h / 4, w / 2, w / 4, color(1, 0, 0), false, false, true, 1.2f)));          // 0
+    scene.push_back(unique_ptr<sphere>(new sphere(0, 3 * h / 4, w / 2, w / 4, color(1, 0, 0), false, true)));          // 0
+
+    scene.push_back(unique_ptr<sphere>(new sphere(2 * w / 3, 5 * h / 6, w / 6, w / 6, color(0, 1, 0), false, false, false, 1.2f, true)));          // 0
+
+    scene.push_back(unique_ptr<sphere>(new sphere(0, 0, 4 * w, h, color(0, 0, 1), false, false, false, 1.2f, true)));          // 0
 
 //    scene.push_back(unique_ptr<sphere>(new sphere(w / 2, 3 * h / 4, w / 2, w / 4, color(1, 0, 0), false, false, false, 1.1f, true)));          // 0
 
