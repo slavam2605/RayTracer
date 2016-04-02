@@ -7,6 +7,7 @@
 #include <memory>
 #include <thread>
 #include <iomanip>
+#include <random>
 
 using namespace std;
 
@@ -259,14 +260,11 @@ vector<unique_ptr<object>> scene;
 
 vec3f rand_dir() {
     while (true) {
-        float x = 2.0f * rand() / RAND_MAX - 1;
-        float y = 2.0f * rand() / RAND_MAX - 1;
-        float z = 2.0f * rand() / RAND_MAX - 1;
-        float len = x * x + y * y + z * z;
-        if (len <= 1) {
-            float sq_len = sqrtf(len);
-            return vec3f(x / sq_len, y / sq_len, z / sq_len);
-        }
+        float x = 2.0f * rand() / RAND_MAX - 1.0f;
+        float y = 2.0f * rand() / RAND_MAX - 1.0f;
+        float len2 = x * x +  y * y;
+        if (len2 > 1) continue;
+        return vec3f(x, y, (2.0f * rand() / RAND_MAX - 1.0f) * sqrtf(1 - len2));
     }
 }
 
