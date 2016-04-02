@@ -67,128 +67,6 @@ float sqr(float x) {
     return x * x;
 }
 
-struct hsv;
-
-inline hsv hsv2hsl(const hsv& cl);
-
-inline hsv hsl2hsv(const hsv& cl);
-
-struct hsv {
-    float h;
-    float s;
-    float v;
-
-
-    hsv(float h, float s, float v) : h(h), s(s), v(v) { }
-
-
-    hsv() { }
-
-    hsv mix(const hsv& o) {
-        hsv hsl1 = hsv2hsl(*this);
-        hsv hsl2 = hsv2hsl(o);
-        float x1 = hsl1.s * cos(PI * hsl1.h / 180);
-        float y1 = hsl1.s * sin(PI * hsl1.h / 180);
-        float z1 = hsl1.v;
-        float x2 = hsl2.s * cos(PI * hsl2.h / 180);
-        float y2 = hsl2.s * sin(PI * hsl2.h / 180);
-        float z2 = hsl2.v;
-        x1 = (x1 + x2) / 2;
-        y1 = (y1 + y2) / 2;
-        z1 = (z1 + z2) / 2;
-        return hsl2hsv(hsv((atan2f(y1, x1) + PI) * 180 / PI, sqrtf(x1 * x1 + y1 * y1), z1));
-    }
-};
-
-inline hsv hsv2hsl(const hsv& cl) {
-    float hue2 = (2 - cl.s) * cl.v;
-    return hsv(
-            cl.h,
-            cl.s * cl.v / (hue2 < 1 ? hue2 : 2 - hue2),
-            hue2 / 2
-    );
-}
-
-inline hsv hsl2hsv(const hsv& cl) {
-    float sat = cl.s * (cl.v < 0.5 ? cl.v : 1 - cl.v);
-    return hsv(
-            cl.h,
-            2 * sat / (cl.v + sat),
-            cl.v + sat
-    );
-}
-
-hsv rgb2hsv(color in) {
-    hsv out;
-    float min, max, delta;
-
-    min = in.r < in.g ? in.r : in.g;
-    min = min < in.b ? min : in.b;
-
-    max = in.r > in.g ? in.r : in.g;
-    max = max > in.b ? max : in.b;
-
-    out.v = max;                                // v
-    delta = max - min;
-    if (delta < 0.00001f) {
-        out.s = 0;
-        out.h = 0; // undefined, maybe nan?
-        return out;
-    }
-    if (max > 0.0f) { // NOTE: if Max is == 0, this divide would cause a crash
-        out.s = (delta / max);                  // s
-    } else {
-        // if max is 0, then r = g = b = 0
-        // s = 0, v is undefined
-        out.s = 0.0f;
-        out.h = NAN;                            // its now undefined
-        return out;
-    }
-    if (in.r >= max)                           // > is bogus, just keeps compilor happy
-        out.h = (in.g - in.b) / delta;        // between yellow & magenta
-    else if (in.g >= max)
-        out.h = 2.0f + (in.b - in.r) / delta;  // between cyan & yellow
-    else
-        out.h = 4.0f + (in.r - in.g) / delta;  // between magenta & cyan
-
-    out.h *= 60.0f;                              // degrees
-
-    if (out.h < 0.0f)
-        out.h += 360.0f;
-
-    return out;
-}
-
-
-color hsv2rgb(hsv in) {
-    if (in.s <= 0.0) {
-        return color(in.v, in.v, in.v);
-    }
-    float hh = in.h / 60.0f;
-    if (hh >= 6) hh = 0.0f;
-    long i = hh;
-    float ff = hh - i;
-    float p = in.v * (1.0f - in.s);
-    float q = in.v * (1.0f - in.s * ff);
-    float t = in.v * (1.0f - in.s * (1.0f - ff));
-
-    switch (i) {
-        case 0:
-            return color(in.v, t, p);
-        case 1:
-            return color(q, in.v, p);
-        case 2:
-            return color(p, in.v, t);
-        case 3:
-            return color(p, q, in.v);
-        case 4:
-            return color(t, p, in.v);
-        case 5:
-        default:
-            return color(in.v, p, q);
-    }
-}
-
 struct vec3f {
     float x;
     float y;
@@ -266,13 +144,42 @@ const int BUNCH_LIMIT = 1;
 
 color get_color(const ray& r, float cn, int bunch_depth, int depth);
 
+enum class surface_type {SIMPLE, LIGHT, MIRROR, TRANSPARENT, GLOSSY};
+
 struct object {
-    color cl;
     float on;
+    bool is_light = false;
+    bool is_mirror = false;
+    bool is_transparent = false;
+    bool is_glossy = false;
 
-    virtual float intersect(const ray& r) = 0;
+    object(surface_type type, float on = 1) {
+        this->on = on;
+        switch (type) {
+            case surface_type::LIGHT:
+                is_light = true;
+                break;
+            case surface_type::MIRROR:
+                is_mirror = true;
+                break;
+            case surface_type::TRANSPARENT:
+                is_transparent = true;
+                break;
+            case surface_type::GLOSSY:
+                is_glossy = true;
+                break;
+            case surface_type::SIMPLE:
+                break;
+        }
+    }
 
-    virtual color get_color(const ray& r, const vec3f& p, float cn, int bunch_depth, int depth) = 0;
+    virtual float intersect(const ray& r) const = 0;
+
+    virtual vec3f get_norm(const ray& r, const vec3f& p) const = 0;
+
+    virtual bool is_inside(const ray& r, const vec3f& p) const = 0;
+
+    virtual color get_color(const vec3f& p) const = 0;
 
     color diffuse(const vec3f& p, float cn, int bunch_depth, int depth, const vec3f& norm) const {
         color light_c;
@@ -303,15 +210,7 @@ struct object {
         if (R > 1e-3) {
             c_refl = ::get_color(ray(p + norm, ss), cn, bunch_depth, depth + 1);
         }
-        color light_c;
-        int n = NN;
-        for (int i = 0; i < n; i++) {
-            vec3f dir = rand_dir();
-            if (dir * norm < 0) dir *= -1;
-            light_c += ::get_color(ray(p + norm, dir), cn, bunch_depth + 1, depth + 1);
-        }
-        light_c /= n;
-        color c_difr = cl * light_c;
+        color c_difr = get_color(p) * diffuse(p, cn, bunch_depth, depth, norm);
         return c_refl * R + c_difr * (1 - R);
     }
 
@@ -336,6 +235,24 @@ struct object {
         return c_refl * R + c_refr * (1 - R);
     }
 
+    color get_color(const ray& r, const vec3f& p, float cn, int bunch_depth, int depth) const {
+        if (depth > DEPTH_LIMIT) return color(0, 0, 0);
+        if (is_light) return get_color(p);
+        vec3f norm = get_norm(r, p);
+        if (is_mirror) {
+            return reflect(r, p, cn, bunch_depth, depth, norm);
+        }
+        if (is_transparent) {
+            float n2 = is_inside(r, p) ? 1 : on;
+            return full_refract(r, p, cn, n2, bunch_depth, depth, norm);
+        }
+        if (bunch_depth > BUNCH_LIMIT) return color(0, 0, 0);
+        if (is_glossy) {
+            return glossy(r, p, cn, bunch_depth, depth, norm);
+        }
+        return get_color(p) * diffuse(p, cn, bunch_depth, depth, norm);
+    }
+
 };
 
 vec3f view(256 / 2, 256 / 2, -256);
@@ -344,28 +261,15 @@ vector<unique_ptr<object>> scene;
 struct sphere : object {
     vec3f c;
     float R;
-    bool is_light;
-    bool is_mirror;
-    bool is_transparent;
-    bool is_glossy;
+    color cl;
 
-    sphere(const vec3f& c, float R, color cl = color(1, 1, 1), bool is_light = false, bool is_mirror = false,
-           bool is_transparent = false, float on = 1, bool is_glossy = false)
-            : c(c), R(R), is_light(is_light), is_mirror(is_mirror), is_transparent(is_transparent), is_glossy(is_glossy) {
-        this->on = on;
-        this->cl = cl;
-    }
+    sphere(const vec3f& c, float R, color cl = color(1, 1, 1), surface_type type = surface_type::SIMPLE, float on = 1)
+            : object(type, on), c(c), R(R), cl(cl) { }
 
-    sphere(float x, float y, float z, float R, color cl = color(1, 1, 1), bool is_light = false, bool is_mirror = false,
-           bool is_transparent = false, float on = 1, bool is_glossy = false)
-            : c(x, y, z), R(R), is_light(is_light), is_mirror(is_mirror), is_transparent(is_transparent), is_glossy(is_glossy) {
-        this->on = on;
-        this->cl = cl;
-    }
+    sphere(float x, float y, float z, float R, color cl = color(1, 1, 1), surface_type type = surface_type::SIMPLE, float on = 1)
+            : sphere(vec3f(x, y, z), R, cl, type, on) { }
 
-    sphere() { }
-
-    float intersect(const ray& r) {
+    float intersect(const ray& r) const {
         vec3f dr = c - r.r0;
         float D = sqr(r.s * dr) + sqr(R) - dr * dr;
         if (D < 1e-5) return 2 * INF;
@@ -376,81 +280,50 @@ struct sphere : object {
         } else return result;
     }
 
-    vec3f get_norm(const ray& r, const vec3f& p) {
+    vec3f get_norm(const ray& r, const vec3f& p) const {
         vec3f norm = (p - c) / R;
         if (r.s * norm > 0) norm *= -1;
         return norm;
     }
 
-    bool is_inside(const ray& r, const vec3f& p) {
+    bool is_inside(const ray& r, const vec3f& p) const {
         return r.s * (p - c) > 0;
     }
 
-    color get_color(const ray& r, const vec3f& p, float cn, int bunch_depth, int depth) {
-        if (depth > DEPTH_LIMIT) return color(0, 0, 0);
-        if (is_light) return cl;
-        vec3f norm = get_norm(r, p);
-        if (is_mirror) {
-            return reflect(r, p, cn, bunch_depth, depth, norm);
-        }
-        if (is_transparent) {
-            float n2 = is_inside(r, p) ? on : 1;
-            return full_refract(r, p, cn, n2, bunch_depth, depth, norm);
-        }
-        if (bunch_depth > BUNCH_LIMIT) return color(0, 0, 0);
-        if (is_glossy) {
-            return glossy(r, p, cn, bunch_depth, depth, norm);
-        }
-        return diffuse(p, cn, bunch_depth, depth, norm);
+    color get_color(const vec3f& p) const {
+        return cl;
     }
+
 };
 
 struct plane : object {
     vec3f norm;
     float D;
-    bool is_mirror;
 
-    plane(const vec3f& norm, float D, const color& cl = color(1, 1, 1), bool is_mirror = false)
-            : norm(norm), D(D), is_mirror(is_mirror) {
-        this->cl = cl;
-    }
+    plane(const vec3f& norm, float D, surface_type type = surface_type::SIMPLE, float on = 1)
+            : object(type, on), norm(norm), D(D) { }
 
-    plane(const vec3f& norm, const vec3f& p, const color& cl = color(1, 1, 1), bool is_mirror = false)
-            : norm(norm), D(norm * (-1) * p), is_mirror(is_mirror) {
-        this->cl = cl;
-    }
+    plane(const vec3f& norm, const vec3f& p, surface_type type = surface_type::SIMPLE, float on = 1)
+            : plane(norm, -(norm * p), type, on) { }
 
-    float intersect(const ray& r) {
+    float intersect(const ray& r) const {
         float result = -(D + r.r0 * norm) / (r.s * norm);
         if (result < 1e-5) return 2 * INF;
         return result;
     }
 
-    color get_color(const ray& r, const vec3f& p, float cn, int bunch_depth, int depth) {
-        if (depth > DEPTH_LIMIT) return color(0, 0, 0);
-        if (is_mirror) {
-            return reflect(r, p, cn, bunch_depth, depth, norm);
-        }
-        if (bunch_depth > BUNCH_LIMIT) return color(0, 0, 0);
-        color cll;
-        if (norm.y != 0) {
-            if (((int) floor(p.x / 100) + (int) floor(p.z / 100)) & 1)
-                cll = color(1, 0, 0);
-            else
-                cll = color(1, 1, 1);
-        }
-        color light_c;
-        int n = NN;
-        for (int i = 0; i < n; i++) {
-            vec3f dir = rand_dir();
-            if (dir * norm < 0) dir *= -1;
-            light_c += ::get_color(ray(p + norm, dir), cn, bunch_depth + 1, depth + 1);
-        }
-        light_c /= n;
-        return cll * light_c;
-        //if (((int) floor(p.x / 100) + (int) floor(p.z / 100)) & 1) return color(1, 0, 0); else return color(1, 1, 1);
-        //return cl * diffuse(p, cn, bunch_depth, depth, norm);
+    vec3f get_norm(const ray& r, const vec3f& p) const {
+        return norm;
     }
+
+    bool is_inside(const ray& r, const vec3f& p) const {
+        return r.s * norm > 0;
+    }
+
+    color get_color(const vec3f& p) const {
+        return ((int) floor(p.x / 100) + (int) floor(p.z / 100)) & 1 ? color(1, 0, 0) : color(1, 1, 1);
+    }
+
 };
 
 const int w = 512;
@@ -458,7 +331,7 @@ const int h = 512;
 
 color get_color(float x, float y) {
     int N = 0;
-    float range = 2.5f;
+    float range = 10.0f;
     color cl;
     for (int i = -N; i <= N; i++) {
         for (int j = -N; j <= N; j++) {
@@ -487,7 +360,6 @@ color get_color(const ray& r, float cn, int bunch_depth, int depth) {
 }
 
 color mix2(color c1, color c2) {
-//    return hsv2rgb(rgb2hsv(c1).mix(rgb2hsv(c2)));
     return (c1 + c2) / 2;
 }
 
@@ -527,10 +399,10 @@ void perform(int k, int n) {
             cl[offset + 1] = pixel.g * 255;
             cl[offset + 2] = pixel.b * 255;
         }
-        if (i % 10 == 0) {
+//        if (i % 10 == 0) {
             progress[k] = 100 * (i + 1 - start) / (end - start);
             print(n);
-        }
+//        }
     }
     progress[k] = -1;
 }
@@ -551,18 +423,14 @@ int main() {
 //    scene.push_back(unique_ptr<sphere>(new sphere(w + f * MARGIN, -f * MARGIN, 0 - f * MARGIN, w / 5, color(30, 30, 30), true)));       // 5
 
 
-    scene.push_back(unique_ptr<sphere>(new sphere(w / 2, -h, w / 2, w / 5, color(100, 100, 100), true)));          // 1
 
-/*
+    scene.push_back(unique_ptr<sphere>(new sphere(w / 2, -h, w / 2, w / 5, color(100, 100, 100), surface_type::LIGHT)));
+    scene.push_back(unique_ptr<sphere>(new sphere(w / 2, 3 * h / 4, w / 2, w / 4, color(1, 0, 0), surface_type::GLOSSY, 1.2f)));
+    scene.push_back(unique_ptr<sphere>(new sphere(w, 3 * h / 4, w / 2, w / 4, color(1, 0, 0), surface_type::TRANSPARENT , 1.2f)));
+    scene.push_back(unique_ptr<sphere>(new sphere(0, 3 * h / 4, w / 2, w / 4, color(1, 0, 0), surface_type::MIRROR)));
+    scene.push_back(unique_ptr<sphere>(new sphere(2 * w / 3, 5 * h / 6, w / 6, w / 6, color(0, 1, 0), surface_type::GLOSSY, 1.2f)));
+    scene.push_back(unique_ptr<sphere>(new sphere(0, 0, 4 * w, h, color(0, 0, 1), surface_type::GLOSSY, 1.2f)));
 
-    scene.push_back(unique_ptr<sphere>(new sphere(w / 2, 3 * h / 4, w / 2, w / 4, color(0.5f, 0.5f, 0), false, false, false, 1.2f, true)));          // 0
-    scene.push_back(unique_ptr<sphere>(new sphere(w, 3 * h / 4, w / 2, w / 4, color(1, 0, 0), false, false, true, 1.2f)));          // 0
-    scene.push_back(unique_ptr<sphere>(new sphere(0, 3 * h / 4, w / 2, w / 4, color(1, 0, 0), false, true)));          // 0
-
-    scene.push_back(unique_ptr<sphere>(new sphere(2 * w / 3, 5 * h / 6, w / 6, w / 6, color(0, 1, 0), false, false, false, 1.2f, true)));          // 0
-
-    scene.push_back(unique_ptr<sphere>(new sphere(0, 0, 4 * w, h, color(0, 0, 1), false, false, false, 1.2f, true)));          // 0
-*/
 
 
 //    scene.push_back(unique_ptr<sphere>(new sphere(w / 2, 3 * h / 4, w / 2, w / 4, color(1, 0, 0), false, false, false, 1.1f, true)));          // 0
@@ -574,7 +442,7 @@ int main() {
 //    scene.push_back(unique_ptr<plane>(new plane(vec3f(-1, 0, 0), vec3f(w + MARGIN, 0, 0), color(1, 1, 0))));                            // 6
 //    scene.push_back(unique_ptr<plane>(new plane(vec3f(1, 0, 0), vec3f(0 - MARGIN, 0, 0), color(1, 1, 0))));                             // 7
     scene.push_back(unique_ptr<plane>(
-            new plane(vec3f(0, -1, 0), vec3f(0, h, 0), color(1, 0, 1))));                            // 8
+            new plane(vec3f(0, -1, 0), vec3f(0, h, 0), surface_type::SIMPLE)));                            // 8
 //    scene.push_back(unique_ptr<plane>(new plane(vec3f(0, 1, 0), vec3f(0, 0 - MARGIN, 0), color(1, 0, 1))));                             // 9
 //    scene.push_back(unique_ptr<plane>(new plane(vec3f(0, 0, -1), vec3f(0, 0, w + MARGIN), color(0, 1, 1))));                            // 10
 //    scene.push_back(unique_ptr<plane>(new plane(vec3f(0, 0, 1), vec3f(0, 0, 0 - MARGIN), color(0, 1, 1))));                             // 11
@@ -586,24 +454,24 @@ int main() {
 //    return 0;
 
     int start_time = time(0);
-//    string path = "E:\\C++ Projects\\RayTracer\\";
-    string path = "C:\\Users\\slava\\ClionProjects\\RayTracer\\RayTracer\\";
+    string path = "E:\\C++ Projects\\RayTracer\\";
+//    string path = "C:\\Users\\slava\\ClionProjects\\RayTracer\\RayTracer\\";
 
-//    thread t1(perform, 0, 8), t2(perform, 1, 8), t3(perform, 2, 8), t4(perform, 3, 8),
-//            t5(perform, 4, 8), t6(perform, 5, 8), t7(perform, 6, 8), t8(perform, 7, 8);
-//    t1.join();
-//    t2.join();
-//    t3.join();
-//    t4.join();
-//    t5.join();
-//    t6.join();
-//    t7.join();
-//    t8.join();
-    thread t1(perform, 0, 4), t2(perform, 1, 4), t3(perform, 2, 4), t4(perform, 3, 4);
+    thread t1(perform, 0, 8), t2(perform, 1, 8), t3(perform, 2, 8), t4(perform, 3, 8),
+            t5(perform, 4, 8), t6(perform, 5, 8), t7(perform, 6, 8), t8(perform, 7, 8);
     t1.join();
     t2.join();
     t3.join();
     t4.join();
+    t5.join();
+    t6.join();
+    t7.join();
+    t8.join();
+//    thread t1(perform, 0, 4), t2(perform, 1, 4), t3(perform, 2, 4), t4(perform, 3, 4);
+//    t1.join();
+//    t2.join();
+//    t3.join();
+//    t4.join();
 //    perform(0, 1);
 
     ofstream fout(path + "out.ppm", ios::out | ios::binary);
