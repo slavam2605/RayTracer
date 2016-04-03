@@ -19,7 +19,7 @@ struct color {
 
     color() : r(0), g(0), b(0) { }
 
-    color operator*(const color& o) const {
+    color operator*(const color &o) const {
         return color(r * o.r, g * o.g, b * o.b);
     }
 
@@ -31,25 +31,25 @@ struct color {
         return color(r / a, g / a, b / a);
     }
 
-    color operator+(const color& o) const {
+    color operator+(const color &o) const {
         return color(r + o.r, g + o.g, b + o.b);
     }
 
-    color& operator+=(const color& o) {
+    color &operator+=(const color &o) {
         r += o.r;
         g += o.g;
         b += o.b;
         return *this;
     }
 
-    color& operator/=(float a) {
+    color &operator/=(float a) {
         r /= a;
         g /= a;
         b /= a;
         return *this;
     }
 
-    color& normalize() {
+    color &normalize() {
         if (r < 0) r = 0.0f;
         if (r > 1) r = 1.0f;
         if (g < 0) g = 0.0f;
@@ -76,15 +76,15 @@ struct vec3f {
 
     vec3f() : x(0.0f), y(0.0f), z(0.0f) { }
 
-    vec3f operator+(const vec3f& b) const {
+    vec3f operator+(const vec3f &b) const {
         return vec3f(this->x + b.x, this->y + b.y, this->z + b.z);
     }
 
-    vec3f operator-(const vec3f& b) const {
+    vec3f operator-(const vec3f &b) const {
         return vec3f(this->x - b.x, this->y - b.y, this->z - b.z);
     }
 
-    float operator*(const vec3f& b) const {
+    float operator*(const vec3f &b) const {
         return this->x * b.x + this->y * b.y + this->z * b.z;
     }
 
@@ -96,18 +96,30 @@ struct vec3f {
         return vec3f(this->x / a, this->y / a, this->z / a);
     }
 
-    vec3f& operator/=(float a) {
+    vec3f &operator/=(float a) {
         this->x /= a;
         this->y /= a;
         this->z /= a;
         return *this;
     }
 
-    vec3f& operator*=(float a) {
+    vec3f &operator*=(float a) {
         this->x *= a;
         this->y *= a;
         this->z *= a;
         return *this;
+    }
+
+    vec3f operator%(const vec3f& b) const {
+        return vec3f(
+                y * b.z - z * b.y,
+                z * b.x - x * b.z,
+                x * b.y - y * b.x
+        );
+    }
+
+    vec3f normalize() const {
+        return *this / sqrtf(x * x + y * y + z * z);
     }
 
 };
@@ -116,15 +128,15 @@ struct ray {
     vec3f r0;
     vec3f s;
 
-    ray(const vec3f& r0, const vec3f& s) : r0(r0), s(s / sqrtf(s.x * s.x + s.y * s.y + s.z * s.z)) { }
+    ray(const vec3f &r0, const vec3f &s) : r0(r0), s(s / sqrtf(s.x * s.x + s.y * s.y + s.z * s.z)) { }
 
     ray() { }
 };
 
 const float INF = 1e10;
-const int NN = 500;
+const int NN = 1000;
 
-//unsigned int rand_state;
+//thread_local unsigned int rand_state = time(0);
 //#define RAND_MAX 4294967295
 //#define mrand() (rand_state = 214013 * rand_state + 2531011)
 
@@ -133,18 +145,20 @@ vec3f rand_dir() {
         float x = 2.0f * rand() / RAND_MAX - 1.0f;
         float y = 2.0f * rand() / RAND_MAX - 1.0f;
         float z = 2.0f * rand() / RAND_MAX - 1.0f;
-        float len = x * x +  y * y + z * z;
+        float len = x * x + y * y + z * z;
         if (len > 1) continue;
         return vec3f(x, y, z);
     }
 }
 
 const int DEPTH_LIMIT = 10;
-const int BUNCH_LIMIT = 1;
+const int BUNCH_LIMIT = 2;
 
-color get_color(const ray& r, float cn, int bunch_depth, int depth);
+color get_color(const ray &r, float cn, int bunch_depth, int depth);
 
-enum class surface_type {SIMPLE, LIGHT, MIRROR, TRANSPARENT, GLOSSY};
+enum class surface_type {
+    SIMPLE, LIGHT, MIRROR, TRANSPARENT, GLOSSY
+};
 
 struct object {
     float on;
@@ -173,15 +187,15 @@ struct object {
         }
     }
 
-    virtual float intersect(const ray& r) const = 0;
+    virtual float intersect(const ray &r) const = 0;
 
-    virtual vec3f get_norm(const ray& r, const vec3f& p) const = 0;
+    virtual vec3f get_norm(const ray &r, const vec3f &p) const = 0;
 
-    virtual bool is_inside(const ray& r, const vec3f& p) const = 0;
+    virtual bool is_inside(const ray &r, const vec3f &p) const = 0;
 
-    virtual color get_color(const vec3f& p) const = 0;
+    virtual color get_color(const ray& r, const vec3f &p) const = 0;
 
-    color diffuse(const vec3f& p, float cn, int bunch_depth, int depth, const vec3f& norm) const {
+    color diffuse(const vec3f &p, float cn, int bunch_depth, int depth, const vec3f &norm) const {
         color light_c;
         int n = NN;
         for (int i = 0; i < n; i++) {
@@ -193,12 +207,12 @@ struct object {
         return light_c;
     }
 
-    color reflect(const ray& r, const vec3f& p, float cn, int bunch_depth, int depth, const vec3f& norm) const {
+    color reflect(const ray &r, const vec3f &p, float cn, int bunch_depth, int depth, const vec3f &norm) const {
         vec3f s = r.s - norm * 2 * (r.s * norm);
         return ::get_color(ray(p + norm, s), cn, bunch_depth, depth + 1);
     }
 
-    color glossy(const ray& r, const vec3f& p, float cn, int bunch_depth, int depth, const vec3f& norm) const {
+    color glossy(const ray &r, const vec3f &p, float cn, int bunch_depth, int depth, const vec3f &norm) const {
         float cosa = -(r.s * norm);
         float sina = sqrtf(fabs(1 - cosa * cosa));
         float sinb = cn / on * sina;
@@ -210,11 +224,12 @@ struct object {
         if (R > 1e-3) {
             c_refl = ::get_color(ray(p + norm, ss), cn, bunch_depth, depth + 1);
         }
-        color c_difr = get_color(p) * diffuse(p, cn, bunch_depth, depth, norm);
+        color c_difr = get_color(r, p) * diffuse(p, cn, bunch_depth, depth, norm);
         return c_refl * R + c_difr * (1 - R);
     }
 
-    color full_refract(const ray& r, const vec3f& p, float cn, float n2, int bunch_depth, int depth, const vec3f& norm) const {
+    color full_refract(const ray &r, const vec3f &p, float cn, float n2, int bunch_depth, int depth,
+                       const vec3f &norm) const {
         vec3f s = r.s * cn;
         float D = (n2 * n2 - cn * cn) / (s * norm) / (s * norm) + 1;
 
@@ -235,9 +250,9 @@ struct object {
         return c_refl * R + c_refr * (1 - R);
     }
 
-    color get_color(const ray& r, const vec3f& p, float cn, int bunch_depth, int depth) const {
+    color get_color(const ray &r, const vec3f &p, float cn, int bunch_depth, int depth) const {
         if (depth > DEPTH_LIMIT) return color(0, 0, 0);
-        if (is_light) return get_color(p);
+        if (is_light) return get_color(r, p);
         vec3f norm = get_norm(r, p);
         if (is_mirror) {
             return reflect(r, p, cn, bunch_depth, depth, norm);
@@ -250,7 +265,7 @@ struct object {
         if (is_glossy) {
             return glossy(r, p, cn, bunch_depth, depth, norm);
         }
-        return get_color(p) * diffuse(p, cn, bunch_depth, depth, norm);
+        return get_color(r,  p) * diffuse(p, cn, bunch_depth, depth, norm);
     }
 
 };
@@ -263,13 +278,14 @@ struct sphere : object {
     float R;
     color cl;
 
-    sphere(const vec3f& c, float R, color cl = color(1, 1, 1), surface_type type = surface_type::SIMPLE, float on = 1)
+    sphere(const vec3f &c, float R, color cl = color(1, 1, 1), surface_type type = surface_type::SIMPLE, float on = 1)
             : object(type, on), c(c), R(R), cl(cl) { }
 
-    sphere(float x, float y, float z, float R, color cl = color(1, 1, 1), surface_type type = surface_type::SIMPLE, float on = 1)
+    sphere(float x, float y, float z, float R, color cl = color(1, 1, 1), surface_type type = surface_type::SIMPLE,
+           float on = 1)
             : sphere(vec3f(x, y, z), R, cl, type, on) { }
 
-    float intersect(const ray& r) const {
+    float intersect(const ray &r) const {
         vec3f dr = c - r.r0;
         float D = sqr(r.s * dr) + sqr(R) - dr * dr;
         if (D < 1e-5) return 2 * INF;
@@ -280,17 +296,17 @@ struct sphere : object {
         } else return result;
     }
 
-    vec3f get_norm(const ray& r, const vec3f& p) const {
+    vec3f get_norm(const ray &r, const vec3f &p) const {
         vec3f norm = (p - c) / R;
         if (r.s * norm > 0) norm *= -1;
         return norm;
     }
 
-    bool is_inside(const ray& r, const vec3f& p) const {
+    bool is_inside(const ray &r, const vec3f &p) const {
         return r.s * (p - c) > 0;
     }
 
-    color get_color(const vec3f& p) const {
+    color get_color(const ray& r, const vec3f &p) const {
         return cl;
     }
 
@@ -299,29 +315,102 @@ struct sphere : object {
 struct plane : object {
     vec3f norm;
     float D;
+    color cl;
 
-    plane(const vec3f& norm, float D, surface_type type = surface_type::SIMPLE, float on = 1)
-            : object(type, on), norm(norm), D(D) { }
+    plane(const vec3f &norm, float D, color cl = color(1, 1, 1), surface_type type = surface_type::SIMPLE, float on = 1)
+            : object(type, on), norm(norm.normalize()), D(D), cl(cl) { }
 
-    plane(const vec3f& norm, const vec3f& p, surface_type type = surface_type::SIMPLE, float on = 1)
-            : plane(norm, -(norm * p), type, on) { }
+    plane(const vec3f &norm, const vec3f &p, color cl = color(1, 1, 1), surface_type type = surface_type::SIMPLE, float on = 1)
+            : plane(norm.normalize(), -(norm.normalize() * p), cl, type, on) { }
 
-    float intersect(const ray& r) const {
+    virtual float intersect(const ray &r) const {
         float result = -(D + r.r0 * norm) / (r.s * norm);
         if (result < 1e-5) return 2 * INF;
         return result;
     }
 
-    vec3f get_norm(const ray& r, const vec3f& p) const {
+    vec3f get_norm(const ray &r, const vec3f &p) const {
         return norm;
     }
 
-    bool is_inside(const ray& r, const vec3f& p) const {
+    bool is_inside(const ray &r, const vec3f &p) const {
         return r.s * norm > 0;
     }
 
-    color get_color(const vec3f& p) const {
+    color get_color(const ray& r, const vec3f &p) const {
         return ((int) floor(p.x / 100) + (int) floor(p.z / 100)) & 1 ? color(1, 0, 0) : color(1, 1, 1);
+    }
+
+};
+
+struct vec4f {
+    float x;
+    float y;
+    float z;
+    float t;
+
+    vec4f(float x, float y, float z, float t) : x(x), y(y), z(z), t(t) { }
+
+    vec4f(const vec3f& v, float t) : x(v.x), y(v.y), z(v.z), t(t) { }
+
+    vec4f(const vec3f& v, const vec3f& p) : x(v.x), y(v.y), z(v.z), t(-(v * p)) { }
+
+    vec4f() : x(0), y(0), z(0), t(0) { }
+
+    float operator*(const vec3f& p) const {
+        return x * p.x + y * p.y + z * p.z + t;
+    }
+
+    vec4f& operator*=(float a) {
+        x *= a;
+        y *= a;
+        z *= a;
+        t *= a;
+        return *this;
+    }
+};
+
+struct triangle : plane {
+    vec3f a, b, c;
+    vec3f na, nb, nc;
+    vec4f p1, p2, p3;
+
+    triangle(const vec3f &a, const vec3f &b, const vec3f &c, const vec3f &na, const vec3f &nb,
+             const vec3f &nc, color cl = color(1, 1, 1), surface_type type = surface_type::SIMPLE, float on = 1)
+            : plane((a - b) % (a - c), a, cl, type, on), a(a), b(b), c(c), na(na), nb(nb), nc(nc) {
+        p1 = vec4f((b - c) % norm, b);
+        if (p1 * a > 0) p1 *= -1;
+        p2 = vec4f((a - c) % norm, c);
+        if (p2 * b > 0) p2 *= -1;
+        p3 = vec4f((a - b) % norm, a);
+        if (p3 * c > 0) p3 *= -1;
+    }
+
+    triangle(const vec3f &a, const vec3f &b, const vec3f &c, color cl = color(1, 1, 1), surface_type type = surface_type::SIMPLE, float on = 1)
+            : triangle(a, b, c, vec3f(), vec3f(), vec3f(), cl, type, on) {
+        na = norm;
+        nb = norm;
+        nc = norm;
+    }
+
+    triangle(const vec3f &a, const vec3f &b, const vec3f &c, surface_type type = surface_type::SIMPLE, float on = 1)
+            : triangle(a, b, c, color(1, 1, 1), type, on) { }
+
+    float intersect(const ray &r) const {
+        float result = plane::intersect(r);
+        if (result > INF) return result;
+        vec3f p = r.r0 + r.s * result;
+        if (p1 * p <= 0 && p2 * p <= 0 && p3 * p <= 0)
+            return result;
+        else
+            return 2 * INF;
+    }
+
+    color get_color(const ray& r, const vec3f& p) const {
+        if (r.s * norm < 0)
+            return color(0, 0, 1);
+        else
+            return color(0, 0, 0);
     }
 
 };
@@ -331,7 +420,7 @@ const int h = 512;
 
 color get_color(float x, float y) {
     int N = 0;
-    float range = 10.0f;
+    float range = 6.0f;
     color cl;
     for (int i = -N; i <= N; i++) {
         for (int j = -N; j <= N; j++) {
@@ -345,7 +434,7 @@ color get_color(float x, float y) {
     return cl / (2 * N + 1) / (2 * N + 1);
 }
 
-color get_color(const ray& r, float cn, int bunch_depth, int depth) {
+color get_color(const ray &r, float cn, int bunch_depth, int depth) {
     int min_id = 0;
     float min_dist = scene[0]->intersect(r);
     for (int i = 1; i < scene.size(); i++) {
@@ -400,8 +489,8 @@ void perform(int k, int n) {
             cl[offset + 2] = pixel.b * 255;
         }
 //        if (i % 10 == 0) {
-            progress[k] = 100 * (i + 1 - start) / (end - start);
-            print(n);
+        progress[k] = 100 * (i + 1 - start) / (end - start);
+        print(n);
 //        }
     }
     progress[k] = -1;
@@ -409,7 +498,6 @@ void perform(int k, int n) {
 
 int main() {
 //    SetPriorityClass(GetCurrentProcess(), IDLE_PRIORITY_CLASS);
-
     int MARGIN = 4 * w / 3;
 
     float f = 1;
@@ -426,12 +514,30 @@ int main() {
 
     scene.push_back(unique_ptr<sphere>(new sphere(w / 2, -h, w / 2, w / 5, color(100, 100, 100), surface_type::LIGHT)));
     scene.push_back(unique_ptr<sphere>(new sphere(w / 2, 3 * h / 4, w / 2, w / 4, color(1, 0, 0), surface_type::GLOSSY, 1.2f)));
-    scene.push_back(unique_ptr<sphere>(new sphere(w, 3 * h / 4, w / 2, w / 4, color(1, 0, 0), surface_type::TRANSPARENT , 1.2f)));
+    scene.push_back(unique_ptr<sphere>(new sphere(w, 3 * h / 4, w / 2, w / 4, color(1, 0, 0), surface_type::TRANSPARENT, 1.1f)));
     scene.push_back(unique_ptr<sphere>(new sphere(0, 3 * h / 4, w / 2, w / 4, color(1, 0, 0), surface_type::MIRROR)));
     scene.push_back(unique_ptr<sphere>(new sphere(2 * w / 3, 5 * h / 6, w / 6, w / 6, color(0, 1, 0), surface_type::GLOSSY, 1.2f)));
     scene.push_back(unique_ptr<sphere>(new sphere(0, 0, 4 * w, h, color(0, 0, 1), surface_type::GLOSSY, 1.2f)));
 
-
+//    float phi = 0;
+//    float df = PI / 2;
+//    float R = w / 3;
+//    float H = 2 * h / 3;
+//    while (phi < 2 * PI) {
+//        scene.push_back(unique_ptr<triangle>(new triangle(
+//                vec3f(w / 2  + R * cos(phi), h / 2 - H / 2, w / 2 + R * sin(phi)),
+//                vec3f(w / 2  + R * cos(phi), h / 2 + H / 2, w / 2 + R * sin(phi)),
+//                vec3f(w / 2  + R * cos(phi + df), h / 2 - H / 2, w / 2 + R * sin(phi + df)),
+//                surface_type::MIRROR
+//        )));
+//        scene.push_back(unique_ptr<triangle>(new triangle(
+//                vec3f(w / 2  + R * cos(phi), h / 2 + H / 2, w / 2 + R * sin(phi)),
+//                vec3f(w / 2  + R * cos(phi + df), h / 2 + H / 2, w / 2 + R * sin(phi + df)),
+//                vec3f(w / 2  + R * cos(phi + df), h / 2 - H / 2, w / 2 + R * sin(phi + df)),
+//                surface_type::MIRROR
+//        )));
+//        phi += df;
+//    }
 
 //    scene.push_back(unique_ptr<sphere>(new sphere(w / 2, 3 * h / 4, w / 2, w / 4, color(1, 0, 0), false, false, false, 1.1f, true)));          // 0
 
@@ -442,7 +548,7 @@ int main() {
 //    scene.push_back(unique_ptr<plane>(new plane(vec3f(-1, 0, 0), vec3f(w + MARGIN, 0, 0), color(1, 1, 0))));                            // 6
 //    scene.push_back(unique_ptr<plane>(new plane(vec3f(1, 0, 0), vec3f(0 - MARGIN, 0, 0), color(1, 1, 0))));                             // 7
     scene.push_back(unique_ptr<plane>(
-            new plane(vec3f(0, -1, 0), vec3f(0, h, 0), surface_type::SIMPLE)));                            // 8
+            new plane(vec3f(0, -1, 0), vec3f(0, h, 0), color(1, 0, 1))));                            // 8
 //    scene.push_back(unique_ptr<plane>(new plane(vec3f(0, 1, 0), vec3f(0, 0 - MARGIN, 0), color(1, 0, 1))));                             // 9
 //    scene.push_back(unique_ptr<plane>(new plane(vec3f(0, 0, -1), vec3f(0, 0, w + MARGIN), color(0, 1, 1))));                            // 10
 //    scene.push_back(unique_ptr<plane>(new plane(vec3f(0, 0, 1), vec3f(0, 0, 0 - MARGIN), color(0, 1, 1))));                             // 11
@@ -476,7 +582,7 @@ int main() {
 
     ofstream fout(path + "out.ppm", ios::out | ios::binary);
     fout << "P6 " << w << " " << h << " 255 ";
-    fout.write((char*) cl, w * h * 3);
+    fout.write((char *) cl, w * h * 3);
     fout.close();
     cout << float(time(0) - start_time) << " seconds" << endl;
     system(("convert \"" + path + "out.ppm\" \"" + path + "out.png\"").c_str());
